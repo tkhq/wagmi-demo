@@ -1,17 +1,24 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { AuthModal } from '@/components/auth-modal';
 import { FilterType, useTurnkey } from '@turnkey/sdk-react';
 import { server } from '@turnkey/sdk-server';
 import { oauth } from '@/lib/actions';
 import { SignMessage } from '@/components/sign-message';
+import { useConnect } from 'wagmi';
+import { getTurnkeyClient } from '@/lib/turnkey';
 
 export default function Home() {
-  const { authIframeClient } = useTurnkey();
+  const { connectors, connect, status, error } = useConnect();
   const [isOpen, setIsOpen] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
+
+  useEffect(() => {
+    console.log('connector status', status);
+    console.log('connector error', error);
+  }, [status]);
 
   return (
     <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
@@ -41,18 +48,35 @@ export default function Home() {
             return;
           }
 
+          console.log('suborgIds', suborgIds);
+
           const suborgId = suborgIds[0];
-          const iframePublicKey = await authIframeClient!.initEmbeddedKey();
+          const client = await getTurnkeyClient();
+          const iframePublicKey = client?.iframePublicKey;
+          console.log('iframePublicKey', iframePublicKey);
+          if (!iframePublicKey) {
+            console.error('iframePublicKey is undefined');
+            return;
+          }
 
           const session = await oauth({
             suborgID: suborgId!,
             oidcToken: idToken,
-            targetPublicKey: iframePublicKey!,
+            targetPublicKey: iframePublicKey,
             sessionLengthSeconds: 900,
           });
           if (session && session.token) {
-            if (authIframeClient) {
-              await authIframeClient.loginWithSession(session);
+            if (client) {
+              await client.loginWithSession(session);
+              const turnkeyConnector = connectors.find(
+                (c) => c.id === 'turnkey'
+              );
+              console.log('found turnkeyConnector', turnkeyConnector);
+              if (turnkeyConnector) {
+                console.log('connecting with turnkeyConnector');
+                connect({ connector: turnkeyConnector });
+              }
+              console.log(connectors);
               console.log('OAuth login successful');
               setLoggedIn(true);
             } else {
@@ -61,6 +85,7 @@ export default function Home() {
           } else {
             console.error('OAuth login failed');
           }
+          setIsOpen(false);
         }}
       />
       {loggedIn && <SignMessage />}

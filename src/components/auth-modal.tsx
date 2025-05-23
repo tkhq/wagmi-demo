@@ -15,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { GoogleAuthButton } from '@/components/google-auth-button';
-import { useTurnkey } from '@turnkey/sdk-react';
+import { getTurnkeyClient } from '@/lib/turnkey';
 
 export function AuthModal({
   isOpen = false,
@@ -28,7 +28,19 @@ export function AuthModal({
 }) {
   const [open, setOpen] = useState(isOpen);
   const [loading, setLoading] = useState(false);
-  const { authIframeClient } = useTurnkey();
+  const [iframePublicKey, setIframePublicKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    const updateIframeKey = async () => {
+      setLoading(true);
+      const client = await getTurnkeyClient();
+      const iframePublicKey = client?.iframePublicKey;
+      setIframePublicKey(iframePublicKey);
+      setLoading(false);
+    };
+
+    updateIframeKey();
+  }, []);
 
   // Sync local state with the isOpen prop
   useEffect(() => {
@@ -36,16 +48,16 @@ export function AuthModal({
   }, [isOpen]);
 
   useEffect(() => {
-    if (authIframeClient) {
+    if (iframePublicKey) {
       const updateIframeKey = async () => {
         setLoading(true);
-        await authIframeClient.initEmbeddedKey();
+        (await getTurnkeyClient())?.initEmbeddedKey();
         setLoading(false);
       };
 
       updateIframeKey();
     }
-  }, [authIframeClient]);
+  }, [iframePublicKey]);
 
   const handleClose = () => {
     setOpen(false);
@@ -91,7 +103,7 @@ export function AuthModal({
             ) : (
               <GoogleAuthButton
                 onGoogleSuccess={onGoogleSuccess}
-                iframePublicKey={authIframeClient?.iframePublicKey!}
+                iframePublicKey={iframePublicKey || ''}
               />
             )}
             <OAuthButton provider="X / Twitter" icon={<XIcon />} />

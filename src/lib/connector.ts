@@ -22,15 +22,18 @@ export function walletConnector(options: WalletOptions = {}) {
   type Provider = EIP1193Provider;
 
   return createConnector<Provider, Properties>((config) => ({
-    id: 'wallet',
-    name: 'Wallet',
+    id: 'turnkey',
+    name: 'Turnkey',
     type: 'wallet' as const,
 
     async connect() {
+      console.log('calling connect');
       const provider = await this.getProvider();
+      console.log(provider);
       const accounts = await provider.request({
         method: 'eth_requestAccounts',
       });
+      console.log('accounts', accounts);
 
       if (!accountsChanged) {
         accountsChanged = this.onAccountsChanged.bind(this);
@@ -46,7 +49,7 @@ export function walletConnector(options: WalletOptions = {}) {
       }
 
       const chainId = await provider.request({ method: 'eth_chainId' });
-
+      console.log('chainId', { chainId, accounts });
       return {
         accounts: accounts as readonly `0x${string}`[],
         chainId: Number(chainId),
@@ -55,7 +58,7 @@ export function walletConnector(options: WalletOptions = {}) {
 
     async getProvider() {
       if (!provider) {
-        provider = createEIP1193Provider();
+        provider = await createEIP1193Provider();
       }
       return provider;
     },
@@ -74,11 +77,14 @@ export function walletConnector(options: WalletOptions = {}) {
 
     async getAccounts(): Promise<Address[]> {
       const accounts = await provider?.request({ method: 'eth_accounts' });
+      console.log('connector:getAccounts', accounts);
       return accounts as Address[];
     },
 
     async getChainId() {
+      console.log('connector:getChainId');
       const chainId = await provider?.request({ method: 'eth_chainId' });
+      console.log('connector:getChainId', chainId);
       return Number(chainId);
     },
 
@@ -95,7 +101,10 @@ export function walletConnector(options: WalletOptions = {}) {
       if (accounts.length === 0) this.onDisconnect();
       else
         config.emitter.emit('change', {
-          accounts: accounts.map((x) => getAddress(x)),
+          accounts: accounts.map((x) => {
+            console.log('connector:onAccountsChanged', x, getAddress(x));
+            return getAddress(x);
+          }),
         });
     },
 
