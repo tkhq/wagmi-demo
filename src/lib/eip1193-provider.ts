@@ -6,13 +6,14 @@ import {
   pad,
   getAddress,
   RpcRequestError,
+  Hex,
 } from 'viem';
 
 import EventEmitter from 'events';
 import { getTurnkeyClient } from './turnkey';
 import { holesky } from 'viem/chains';
 import { getHttpRpcClient } from 'viem/utils';
-
+import { serializeSignature } from 'viem';
 interface ProviderStore {
   accounts: string[];
   organizationId?: string;
@@ -24,7 +25,7 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
   const session = JSON.parse(
     localStorage.getItem('@turnkey/session/v2') || '{}'
   );
-  console.log('session', session);
+
   const client = await getTurnkeyClient();
   if (!client) {
     throw new Error('Iframe client is not defined');
@@ -159,7 +160,6 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
     if (!client) {
       throw new Error('Iframe client is not defined');
     }
-    console.log('method', method);
 
     if (method === 'eth_chainId') {
       return holesky.id;
@@ -197,19 +197,23 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
       case 'eth_accounts':
 
       case 'eth_requestAccounts':
-        console.log('getting wallets');
         const { wallets } = await client.getWallets({
           organizationId: session.organizationId,
         });
-        console.log('wallets', wallets);
+
         const accounts = await Promise.all(
           wallets.map(async ({ walletId }: { walletId: string }) => {
             const { accounts } = await client.getWalletAccounts({
               walletId,
               organizationId: session.organizationId,
             });
-            console.log('accounts', accounts);
-            return accounts.map(({ address }) => getAddress(address));
+
+            return accounts
+              .filter(
+                ({ addressFormat }) =>
+                  addressFormat === 'ADDRESS_FORMAT_ETHEREUM'
+              )
+              .map(({ address }) => getAddress(address));
           })
         );
         updateAccounts(accounts.flat());
@@ -218,14 +222,20 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
       case 'personal_sign':
       case 'eth_sign':
         const [message, signWith] = params as WalletRpcSchema[6]['Parameters'];
-        console.log('sign', { signWith, message });
-        const signature = await client.signRawPayload({
+
+        const { r, s, v } = await client.signRawPayload({
           signWith: getAddress(signWith),
           payload: pad(message),
           encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
           hashFunction: 'HASH_FUNCTION_NO_OP',
         });
-        console.log('signature', signature);
+
+        const signature = serializeSignature({
+          r: `0x${r}`,
+          s: `0x${s}`,
+          yParity: 1,
+        });
+
         return signature;
       case 'eth_sendTransaction':
         const [transaction] = params as WalletRpcSchema[7]['Parameters'];
@@ -233,7 +243,6 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
           method: 'eth_signTransaction',
           params: [transaction],
         }) as WalletRpcSchema[7]['ReturnType'];
-        console.log('signedTransaction', signedTransaction);
         return signedTransaction;
       default:
         return null;
