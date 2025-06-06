@@ -27,14 +27,18 @@ export function walletConnector(options: WalletOptions = {}) {
     type: 'wallet' as const,
 
     async connect() {
-      console.log('calling connect');
+      console.group('🔌 [Connector] Connection');
+      console.log('Initializing Turnkey connector...');
+      
       const provider = await this.getProvider();
-      console.log(provider);
+      console.log('Provider ready');
+      
       const accounts = await provider.request({
         method: 'eth_requestAccounts',
       });
-      console.log('accounts', accounts);
+      console.log('Accounts requested:', accounts.length);
 
+      // Set up event listeners
       if (!accountsChanged) {
         accountsChanged = this.onAccountsChanged.bind(this);
         provider.on('accountsChanged', accountsChanged);
@@ -49,7 +53,11 @@ export function walletConnector(options: WalletOptions = {}) {
       }
 
       const chainId = await provider.request({ method: 'eth_chainId' });
-      console.log('chainId', { chainId, accounts });
+      console.log('✅ Connection established');
+      console.log('Chain ID:', chainId);
+      console.log('Primary account:', accounts[0]);
+      console.groupEnd();
+      
       return {
         accounts: accounts as readonly `0x${string}`[],
         chainId: Number(chainId),
@@ -58,7 +66,9 @@ export function walletConnector(options: WalletOptions = {}) {
 
     async getProvider() {
       if (!provider) {
+        console.log('🔌 [Connector] Creating EIP1193 provider...');
         provider = await createEIP1193Provider();
+        console.log('✅ [Connector] Provider created');
       }
       return provider;
     },
@@ -77,14 +87,13 @@ export function walletConnector(options: WalletOptions = {}) {
 
     async getAccounts(): Promise<Address[]> {
       const accounts = await provider?.request({ method: 'eth_accounts' });
-      console.log('connector:getAccounts', accounts);
+      console.log('🔌 [Connector] Retrieved accounts:', accounts?.length || 0);
       return accounts as Address[];
     },
 
     async getChainId() {
-      console.log('connector:getChainId');
       const chainId = await provider?.request({ method: 'eth_chainId' });
-      console.log('connector:getChainId', chainId);
+      console.log('🔌 [Connector] Retrieved chain ID:', chainId);
       return Number(chainId);
     },
 
@@ -98,17 +107,16 @@ export function walletConnector(options: WalletOptions = {}) {
     },
 
     onAccountsChanged(accounts: Address[]) {
+      console.log('🔌 [Connector] Accounts changed:', accounts.length);
       if (accounts.length === 0) this.onDisconnect();
       else
         config.emitter.emit('change', {
-          accounts: accounts.map((x) => {
-            console.log('connector:onAccountsChanged', x, getAddress(x));
-            return getAddress(x);
-          }),
+          accounts: accounts.map((x) => getAddress(x)),
         });
     },
 
     onChainChanged(chainId: string) {
+      console.log('🔌 [Connector] Chain changed to:', chainId);
       config.emitter.emit('change', { chainId: Number(chainId) });
     },
 

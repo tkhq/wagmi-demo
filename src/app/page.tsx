@@ -14,6 +14,7 @@ import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { SolanaAccount } from '@/components/account.solana';
 import { EthereumAccount } from '@/components/account.ethereum';
 import { SignMessageSolana } from '@/components/sign-message.solana';
+import { SendTransactionSolana } from '@/components/send-transaction.solana';
 
 const SOLANA_ACCOUNT = {
   curve: 'CURVE_ED25519' as const,
@@ -128,9 +129,10 @@ export default function Home() {
       />
       {loggedIn && (
         <div className="flex gap-4">
-          <div>
+          <div className="space-y-4">
             <SolanaAccount />
             <SignMessageSolana />
+            <SendTransactionSolana />
           </div>
           <div className="space-y-4">
             <EthereumAccount />
