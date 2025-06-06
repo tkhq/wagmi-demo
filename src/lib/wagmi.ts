@@ -1,12 +1,12 @@
-import { holesky } from 'wagmi/chains';
+import { base } from 'wagmi/chains';
 import { createConfig, http } from 'wagmi';
 import { walletConnector } from './connector';
 
 export const config = createConfig({
   connectors: [walletConnector()],
-  chains: [holesky],
+  chains: [base],
   ssr: true,
   transports: {
-    [holesky.id]: http(holesky.rpcUrls.default.http[0]),
+    [base.id]: http(base.rpcUrls.default.http[0]),
   },
 });

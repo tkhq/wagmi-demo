@@ -7,12 +7,14 @@ import { FilterType } from '@turnkey/sdk-react';
 import { DEFAULT_ETHEREUM_ACCOUNTS, server } from '@turnkey/sdk-server';
 import { oauth } from '@/lib/actions';
 import { SignMessage } from '@/components/sign-message';
+import { SendTransaction } from '@/components/send-transaction';
 import { useConnect } from 'wagmi';
 import { getTurnkeyClient } from '@/lib/turnkey';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { SolanaAccount } from '@/components/account.solana';
 import { EthereumAccount } from '@/components/account.ethereum';
 import { SignMessageSolana } from '@/components/sign-message.solana';
+import { SendTransactionSolana } from '@/components/send-transaction.solana';
 
 const SOLANA_ACCOUNT = {
   curve: 'CURVE_ED25519' as const,
@@ -127,13 +129,15 @@ export default function Home() {
       />
       {loggedIn && (
         <div className="flex gap-4">
-          <div>
+          <div className="space-y-4">
             <SolanaAccount />
             <SignMessageSolana />
+            <SendTransactionSolana />
           </div>
-          <div>
+          <div className="space-y-4">
             <EthereumAccount />
             <SignMessage />
+            <SendTransaction />
           </div>
         </div>
       )}

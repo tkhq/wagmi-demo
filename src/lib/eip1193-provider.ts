@@ -6,17 +6,36 @@ import {
   pad,
   getAddress,
   RpcRequestError,
-  Hex,
+  serializeSignature,
+  serializeTransaction,
+  hexToBigInt,
 } from 'viem';
 
 import EventEmitter from 'events';
 import { getTurnkeyClient } from './turnkey';
-import { holesky } from 'viem/chains';
+import { base } from 'viem/chains';
 import { getHttpRpcClient } from 'viem/utils';
-import { serializeSignature } from 'viem';
+
 interface ProviderStore {
   accounts: string[];
   organizationId?: string;
+}
+
+interface RpcResponse {
+  jsonrpc: string;
+  id: number;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+}
+
+interface HttpRpcClient {
+  request: (params: {
+    body: { method: string; params: unknown[]; id: number };
+  }) => Promise<unknown>;
 }
 
 export async function createEIP1193Provider(): Promise<EIP1193Provider> {
@@ -42,8 +61,8 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
    */
   const requestQueue: {
     [method: string]: {
-      resolve: (value: any) => void;
-      reject: (reason?: any) => void;
+      resolve: (value: unknown) => void;
+      reject: (reason?: unknown) => void;
     };
   } = {};
 
@@ -72,10 +91,6 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
 
   const updateAccounts = (accounts: string[]) => {
     updateStore({ accounts });
-  };
-
-  const updateOrganization = (organizationId: string) => {
-    updateStore({ organizationId });
   };
 
   const handleMessage = (event: MessageEvent) => {
@@ -149,153 +164,205 @@ export async function createEIP1193Provider(): Promise<EIP1193Provider> {
     'eth_uninstallFilter',
   ]);
 
-  const request: EIP1193RequestFn<EIP1474Methods> = async function (
-    this: any,
-    { method, params }
-  ) {
-    if (typeof window === 'undefined') {
-      throw new Error('Window is not defined');
-    }
-    const client = await getTurnkeyClient();
-    if (!client) {
-      throw new Error('Iframe client is not defined');
-    }
+  const request = async function (
+    this: unknown,
+    { method, params }: { method: string; params?: unknown }
+  ): Promise<unknown> {
+    console.group(`🌐 [EIP1193] ${method}`);
+    console.log('Parameters:', params);
 
-    if (method === 'eth_chainId') {
-      return holesky.id;
-    }
-
-    // Route public RPC methods through RPC endpoint
-    if (PUBLIC_RPC_METHODS.has(method)) {
-      // Hardcoded for now, this should be configurable
-      const rpcUrl = holesky.rpcUrls.default.http[0];
-
-      if (!rpcUrl) {
-        throw new Error('No RPC URL available for current chain');
+    try {
+      if (typeof window === 'undefined') {
+        throw new Error('Window is not defined');
+      }
+      const client = await getTurnkeyClient();
+      if (!client) {
+        throw new Error('Iframe client is not defined');
       }
 
-      const rpcClient = getHttpRpcClient(rpcUrl);
-      const response = await rpcClient.request({
-        body: {
-          method,
-          params,
-          id: Math.floor(Math.random() * 1000000),
-        },
-      });
-      if ((response as any).error) {
-        throw new RpcRequestError({
-          body: { method, params },
-          error: (response as any).error,
-          url: rpcUrl,
-        });
+      if (method === 'eth_chainId') {
+        console.log('Returning chain ID:', base.id);
+        console.groupEnd();
+        return base.id;
       }
 
-      return (response as any).result;
+      // Route public RPC methods through RPC endpoint
+      if (PUBLIC_RPC_METHODS.has(method)) {
+        console.log('Routing to public RPC endpoint');
+        const rpcUrl = base.rpcUrls.default.http[0];
+
+        if (!rpcUrl) {
+          throw new Error('No RPC URL available for current chain');
+        }
+
+        console.log('RPC URL:', rpcUrl);
+        const rpcClient = getHttpRpcClient(rpcUrl) as HttpRpcClient;
+        const response = await rpcClient.request({
+          body: {
+            method,
+            params: params as unknown[],
+            id: Math.floor(Math.random() * 1000000),
+          },
+        });
+
+        const rpcResponse = response as RpcResponse;
+        if (rpcResponse.error) {
+          console.error('RPC Error:', rpcResponse.error);
+          console.groupEnd();
+          const rpcError = new RpcRequestError({
+            body: { method, params },
+            error: rpcResponse.error,
+            url: rpcUrl,
+          });
+          throw rpcError;
+        }
+
+        console.log('✅ RPC Success');
+        console.log('Result:', rpcResponse.result);
+        console.groupEnd();
+        return rpcResponse.result;
+      }
+
+      switch (method) {
+        case 'eth_accounts':
+        case 'eth_requestAccounts':
+          console.log('Fetching Turnkey wallets...');
+          const { wallets } = await client.getWallets({
+            organizationId: session.organizationId,
+          });
+          console.log('Found wallets:', wallets.length);
+
+          const accounts = await Promise.all(
+            wallets.map(async ({ walletId }: { walletId: string }) => {
+              console.log('Processing wallet:', walletId);
+              const { accounts } = await client.getWalletAccounts({
+                walletId,
+                organizationId: session.organizationId,
+              });
+
+              return accounts
+                .filter(
+                  ({ addressFormat }) =>
+                    addressFormat === 'ADDRESS_FORMAT_ETHEREUM'
+                )
+                .map(({ address }) => getAddress(address));
+            })
+          );
+
+          const flatAccounts = accounts.flat();
+          updateAccounts(flatAccounts);
+          console.log('✅ Ethereum accounts retrieved:', flatAccounts.length);
+          console.log('Primary account:', flatAccounts[0]);
+          console.groupEnd();
+          return [flatAccounts[0]];
+        case 'personal_sign':
+        case 'eth_sign':
+          const [message, signWith] =
+            params as WalletRpcSchema[6]['Parameters'];
+
+          const { r, s } = await client.signRawPayload({
+            signWith: getAddress(signWith),
+            payload: pad(message),
+            encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
+            hashFunction: 'HASH_FUNCTION_NO_OP',
+          });
+
+          const signature = serializeSignature({
+            r: `0x${r}`,
+            s: `0x${s}`,
+            yParity: 1,
+          });
+
+          return signature;
+        case 'eth_signTransaction': {
+          const [transaction] = params as WalletRpcSchema[7]['Parameters'];
+          if (!transaction) {
+            throw new Error('Transaction is required');
+          }
+
+          console.log('Transaction to sign:', transaction);
+
+          // Serialize the prepared transaction (gas, nonce, etc. already set by usePrepareTransactionRequest)
+          const serializedTx = serializeTransaction({
+            to: transaction.to,
+            from: transaction.from,
+            chainId: base.id,
+            gas: hexToBigInt(transaction.gas!),
+            maxFeePerGas: hexToBigInt(transaction.maxFeePerGas!),
+            maxPriorityFeePerGas: hexToBigInt(
+              transaction.maxPriorityFeePerGas!
+            ),
+            nonce: Number(transaction.nonce),
+            value: hexToBigInt(transaction.value!),
+            type: 'eip1559',
+          });
+
+          const serializedTxWithoutPrefix = serializedTx.slice(2);
+          console.log(
+            'Serialized transaction length:',
+            serializedTxWithoutPrefix.length,
+            'chars'
+          );
+
+          // Sign with Turnkey
+          console.log('Signing with Turnkey...');
+          const { signedTransaction } = await client.signTransaction({
+            signWith: getAddress(transaction.from as `0x${string}`),
+            unsignedTransaction: serializedTxWithoutPrefix,
+            type: 'TRANSACTION_TYPE_ETHEREUM',
+            organizationId: session.organizationId,
+          });
+
+          const result = `0x${signedTransaction}`;
+          console.log('✅ Transaction signed successfully');
+          console.log('Signed transaction length:', result.length, 'chars');
+          console.groupEnd();
+          return result;
+        }
+        case 'eth_sendTransaction': {
+          const [transaction] = params as WalletRpcSchema[7]['Parameters'];
+          console.log('Sending transaction:', {
+            to: transaction.to,
+            value: transaction.value,
+            from: transaction.from,
+          });
+
+          console.log('Step 1: Signing transaction...');
+          const signedTransaction = (await request.call(this, {
+            method: 'eth_signTransaction',
+            params: [transaction],
+          })) as string;
+          console.log('Step 2: Broadcasting to network...');
+          const txHash = (await request.call(this, {
+            method: 'eth_sendRawTransaction',
+            params: [signedTransaction],
+          })) as string;
+          console.log('✅ Transaction broadcast successful');
+          console.log('Transaction hash:', txHash);
+          console.groupEnd();
+
+          return txHash;
+        }
+        default:
+          return null;
+      }
+    } catch (error) {
+      console.group('❌ [EIP1193] Error');
+      console.error('Method:', method);
+      console.error(
+        'Error:',
+        error instanceof Error ? error.message : 'Unknown error'
+      );
+      if (error instanceof Error && error.stack) {
+        console.error('Stack trace:', error.stack);
+      }
+      console.groupEnd();
+      throw error;
     }
-
-    switch (method) {
-      case 'eth_accounts':
-
-      case 'eth_requestAccounts':
-        const { wallets } = await client.getWallets({
-          organizationId: session.organizationId,
-        });
-
-        const accounts = await Promise.all(
-          wallets.map(async ({ walletId }: { walletId: string }) => {
-            const { accounts } = await client.getWalletAccounts({
-              walletId,
-              organizationId: session.organizationId,
-            });
-
-            return accounts
-              .filter(
-                ({ addressFormat }) =>
-                  addressFormat === 'ADDRESS_FORMAT_ETHEREUM'
-              )
-              .map(({ address }) => getAddress(address));
-          })
-        );
-        updateAccounts(accounts.flat());
-        console.log('accounts', accounts);
-        return [accounts.flat()[0]];
-      case 'personal_sign':
-      case 'eth_sign':
-        const [message, signWith] = params as WalletRpcSchema[6]['Parameters'];
-
-        const { r, s, v } = await client.signRawPayload({
-          signWith: getAddress(signWith),
-          payload: pad(message),
-          encoding: 'PAYLOAD_ENCODING_HEXADECIMAL',
-          hashFunction: 'HASH_FUNCTION_NO_OP',
-        });
-
-        const signature = serializeSignature({
-          r: `0x${r}`,
-          s: `0x${s}`,
-          yParity: 1,
-        });
-
-        return signature;
-      case 'eth_sendTransaction':
-        const [transaction] = params as WalletRpcSchema[7]['Parameters'];
-        const signedTransaction = this.request({
-          method: 'eth_signTransaction',
-          params: [transaction],
-        }) as WalletRpcSchema[7]['ReturnType'];
-        return signedTransaction;
-      default:
-        return null;
-    }
-
-    // Handle eth_sendTransaction specially as it needs to be signed first
-    // if (method === 'eth_sendTransaction') {
-    //   const [transaction] = params as WalletRpcSchema[7]['Parameters'];
-    //   const signedTransaction = this.request({
-    //     method: 'eth_signTransaction',
-    //     params: [transaction],
-    //   }) as WalletRpcSchema[7]['ReturnType'];
-
-    //   // Route the signed transaction through public RPC
-    //   return this.request({
-    //     method: 'eth_sendRawTransaction',
-    //     params: [signedTransaction],
-    //   });
-    // }
-
-    // if (method === 'eth_requestAccounts') {
-    //   const store = getStore();
-    //   if (store.accounts.length > 0) {
-    //     return store.accounts;
-    //   }
-    //   const client = await iframeClient;
-    //   const { wallets } = await client.getWallets({
-    //     organizationId: store.organizationId,
-    //   });
-    //   wallets.map(({ walletId }: { walletId: string }) => {
-    //     console.log('walletId', walletId);
-    //   });
-
-    //   // TODO: Grab accounts from the turnkey api
-    //   // If no stored accounts, request them
-    //   return this.request({ method: 'eth_requestAccounts' });
-    // }
-
-    // // Handle eth_accounts
-    // if (method === 'eth_accounts') {
-    //   const store = getStore();
-    //   if (store.accounts.length > 0) {
-    //     return store.accounts;
-    //   }
-    //   // If no stored accounts, request them
-    //   return this.request({ method: 'eth_requestAccounts' });
-    // }
-
-    return this.send(method, params);
   };
 
   return {
-    request,
+    request: request as EIP1193RequestFn<EIP1474Methods>,
     on: eventEmitter.on.bind(eventEmitter),
     removeListener: eventEmitter.removeListener.bind(eventEmitter),
   };

@@ -76,9 +76,13 @@ export function GoogleAuthButton({
       setLoading(false);
       return;
     }
+    console.log('Google login window opened - before interval');
     const interval = setInterval(() => {
+      console.log('Google login window opened - inside interval');
       try {
+        console.log('Google login window opened - inside interval - try');
         const url = authWindow.location.href;
+        console.log('Google login window opened - inside interval - url', url);
         if (url.startsWith(window.location.origin)) {
           const hashParams = new URLSearchParams(url.split('#')[1]);
           const idToken = hashParams.get('id_token');
