@@ -54,8 +54,6 @@ const updateStore = (
 const PUBLIC_RPC_METHODS = new Set([
   'eth_sendRawTransaction',
   'eth_chainId',
-  'eth_subscribe',
-  'eth_unsubscribe',
   'eth_blobBaseFee',
   'eth_blockNumber',
   'eth_call',
@@ -205,6 +203,10 @@ export function createEIP1193Provider(): EIP1193Provider {
 
         return `0x${signedTransaction}`;
       }
+
+      case 'eth_subscribe':
+      case 'eth_unsubscribe':
+        throw new Error(`${method} requires a WebSocket transport and is not supported by this HTTP provider`);
 
       default:
         throw new Error(`Unsupported method: ${method}`);

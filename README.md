@@ -6,7 +6,7 @@ Demonstrates embedding a Turnkey wallet into a dApp built on the most common mul
 
 ## What it shows
 
-- **Embedded Turnkey wallet** — passkey, email OTP sign-uo or sign-in via `@turnkey/react-wallet-kit`
+- **Embedded Turnkey wallet** — passkey, email OTP sign-up or sign-in via `@turnkey/react-wallet-kit`
 - **External wallets** — injected EVM wallets (ex Metamask) and optionally WalletConnect via wagmi + RainbowKit; Wallet Standard Solana wallets (ex Phantom) via `@solana/wallet-adapter-react`
 - **Multi-chain** — Ethereum (Sepolia) via wagmi; Solana (devnet) via `@solana/wallet-adapter-react`
 - **Turnkey tx management** — `ethSendTransaction` / `solSendTransaction` + `pollTransactionStatus` for the Turnkey wallet path

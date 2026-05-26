@@ -16,6 +16,12 @@ export function TurnkeyBridgeSync() {
     if (session && wallets.length > 0 && turnkeyBridge._loginResolvers.length > 0) {
       turnkeyBridge.notifyAccountsReady();
     }
+
+    return () => {
+      turnkeyBridge.handleLogin = null;
+      turnkeyBridge.httpClient = null;
+      turnkeyBridge.notifyLoginFailed(new Error('TurnkeyBridgeSync unmounted'));
+    };
   }, [handleLogin, httpClient, session, wallets]);
 
   return null;

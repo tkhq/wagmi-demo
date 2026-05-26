@@ -93,7 +93,7 @@ export const turnkeyBridge: TurnkeyBridge = {
       const addrs = this.getEthAddresses();
       if (addrs.length > 0) return addrs;
     }
-    this.handleLogin();
+    this.handleLogin().catch((err) => this.notifyLoginFailed(err));
     return this.waitForAccounts();
   },
 };
