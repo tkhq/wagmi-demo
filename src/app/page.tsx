@@ -1,146 +1,205 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { AuthModal } from '@/components/auth-modal';
-import { FilterType } from '@turnkey/sdk-react';
-import { DEFAULT_ETHEREUM_ACCOUNTS, server } from '@turnkey/sdk-server';
-import { oauth } from '@/lib/actions';
-import { SignMessage } from '@/components/sign-message';
-import { SendTransaction } from '@/components/send-transaction';
-import { useConnect } from 'wagmi';
-import { getTurnkeyClient } from '@/lib/turnkey';
-import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { SolanaAccount } from '@/components/account.solana';
+import { useEffect, useMemo, useState } from 'react';
+import { useAccount, useConnect, useConnectors, useDisconnect } from 'wagmi';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { type WalletName } from '@solana/wallet-adapter-base';
+import { useTurnkey, WalletSource, type Wallet } from '@turnkey/react-wallet-kit';
+import { turnkeyBridge } from '@/lib/turnkey-bridge';
+import { WalletPicker } from '@/components/wallet-picker';
 import { EthereumAccount } from '@/components/account.ethereum';
+import { SolanaAccount } from '@/components/account.solana';
+import { SignMessage } from '@/components/sign-message';
 import { SignMessageSolana } from '@/components/sign-message.solana';
+import { SendTransaction } from '@/components/send-transaction';
 import { SendTransactionSolana } from '@/components/send-transaction.solana';
 
-const SOLANA_ACCOUNT = {
-  curve: 'CURVE_ED25519' as const,
-  pathFormat: 'PATH_FORMAT_BIP32' as const,
-  path: "m/44'/501'/0'/0'",
-  addressFormat: 'ADDRESS_FORMAT_SOLANA' as const,
-};
+const btnBase = 'h-10 px-4 text-sm font-semibold rounded-xl transition-opacity hover:opacity-90 text-white';
 
 export default function Home() {
-  const { connectors, connect, status, error } = useConnect();
-  const { connection } = useConnection();
+  const { isConnected, connector } = useAccount();
+  const { disconnect: wagmiDisconnect } = useDisconnect();
+  const { connect } = useConnect();
+  const connectors = useConnectors();
   const {
-    publicKey,
-    connect: connectSolanaWallet,
+    connected: solConnected,
     select,
-    wallets,
-    wallet,
-    signMessage: signSolMessage,
+    connect: solConnect,
+    wallet: selectedSolWallet,
+    disconnect: solDisconnect,
+    publicKey,
   } = useWallet();
-  const [isOpen, setIsOpen] = useState(false);
-  const [loggedIn, setLoggedIn] = useState(false);
+  const { session, logout, wallets } = useTurnkey();
 
+  const solAddress = useMemo<string | undefined>(() => {
+    const embedded = ((wallets ?? []) as Wallet[]).filter(w => w.source === WalletSource.Embedded);
+    for (const w of embedded) {
+      const account = w.accounts?.find(a => a.addressFormat === 'ADDRESS_FORMAT_SOLANA');
+      if (account?.address) return account.address;
+    }
+    return undefined;
+  }, [wallets]);
+
+  const [pendingTurnkeyConnect, setPendingTurnkeyConnect] = useState(false);
+  const [pendingSolConnect, setPendingSolConnect] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const { address } = useAccount();
+  const isTurnkeyConnected = isConnected && connector?.id === 'turnkeyWallet';
+
+  const handleTurnkeyLogin = () => {
+    if (session) {
+      const tkConnector = connectors.find((c) => c.id === 'turnkeyWallet');
+      if (tkConnector) connect({ connector: tkConnector });
+    } else {
+      setPendingTurnkeyConnect(true);
+      turnkeyBridge.handleLogin?.();
+    }
+  };
+
+  // After selecting a Solana wallet from the picker, also flag it for explicit connect
+  const handleSolanaSelect = (walletName: WalletName) => {
+    select(walletName);
+    setPendingSolConnect(walletName);
+  };
+
+  // After Turnkey auth completes, connect wagmi
   useEffect(() => {
-    console.log('connector status', status);
-    console.log('connector error', error);
-    console.log('solana connection', connection);
-    console.log('solana public key', publicKey);
-    console.log('solana wallet', wallet);
-  }, [status, connection, publicKey, wallet]);
+    if (!pendingTurnkeyConnect || !session || isConnected) return;
+    const tkConnector = connectors.find((c) => c.id === 'turnkeyWallet');
+    if (tkConnector) {
+      connect({ connector: tkConnector });
+      setPendingTurnkeyConnect(false);
+    }
+  }, [pendingTurnkeyConnect, session, isConnected, connect, connectors]);
+
+  // When an external Solana wallet is selected from the picker, wait for adapter state
+  // to flush (select() is async), then explicitly connect on the next render.
+  useEffect(() => {
+    if (!pendingSolConnect || solConnected) return;
+    if (selectedSolWallet?.adapter.name !== pendingSolConnect) return;
+    setPendingSolConnect(null);
+    solConnect().catch(console.error);
+  }, [pendingSolConnect, solConnected, selectedSolWallet?.adapter.name, solConnect]);
+
+  const handleLogout = async () => {
+    solDisconnect();
+    wagmiDisconnect();
+    await logout();
+  };
 
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <Button
-        onClick={() => setIsOpen(true)}
-        className="rounded-full bg-[#7C3AED] hover:bg-[#6D28D9]"
-      >
-        Open Auth Modal
-      </Button>
-      <AuthModal
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        onGoogleSuccess={async (idToken) => {
-          const resp = await server.getOrCreateSuborg({
-            filterType: FilterType.OidcToken,
-            filterValue: idToken,
-            additionalData: {
-              customAccounts: [SOLANA_ACCOUNT, DEFAULT_ETHEREUM_ACCOUNTS[0]],
-              oauthProviders: [{ providerName: 'google', oidcToken: idToken }],
-            },
-          });
-
-          const suborgIds = resp?.subOrganizationIds;
-          if (!suborgIds || suborgIds.length === 0) {
-            console.error('Failed to create suborg');
-            return;
-          }
-
-          console.log('suborgIds', suborgIds);
-
-          const suborgId = suborgIds[0];
-          const client = await getTurnkeyClient();
-          const iframePublicKey = client?.iframePublicKey;
-
-          if (!iframePublicKey) {
-            console.error('iframePublicKey is undefined');
-            return;
-          }
-
-          const session = await oauth({
-            suborgID: suborgId!,
-            oidcToken: idToken,
-            targetPublicKey: iframePublicKey,
-            sessionLengthSeconds: 900,
-          });
-          if (session && session.token) {
-            if (client) {
-              await client.loginWithSession(session);
-              // Connect wagmi wallet
-              const turnkeyConnector = connectors.find(
-                (c) => c.id === 'turnkey'
-              );
-
-              if (turnkeyConnector) {
-                console.log('connecting with turnkeyConnector');
-                connect({ connector: turnkeyConnector });
-              }
-
-              // Connect solana wallet
-              console.log(
-                'connecting with solana wallet; solana wallets',
-                wallets
-              );
-              const turnkeyWallet = wallets.find(
-                (w) => w.adapter.name === 'Turnkey'
-              );
-              if (!turnkeyWallet) {
-                console.error('Turnkey wallet not found');
-                return;
-              }
-              select(turnkeyWallet.adapter.name);
-              connectSolanaWallet();
-
-              setLoggedIn(true);
-            } else {
-              console.error('authIframeClient is undefined');
-            }
-          } else {
-            console.error('OAuth login failed');
-          }
-          setIsOpen(false);
-        }}
-      />
-      {loggedIn && (
-        <div className="flex gap-4">
-          <div className="space-y-4">
-            <SolanaAccount />
-            <SignMessageSolana />
-            <SendTransactionSolana />
+    <div className="min-h-screen p-8 font-[family-name:var(--font-geist-sans)]">
+      <div className="max-w-6xl mx-auto space-y-8">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">wagmi + Solana Wallet Demo</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              Turnkey embedded wallet alongside external wallets on Ethereum and Solana
+            </p>
           </div>
-          <div className="space-y-4">
-            <EthereumAccount />
-            <SignMessage />
-            <SendTransaction />
-          </div>
+          {session && (
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-muted-foreground font-mono">
+                org: {session.organizationId}
+              </span>
+              <button onClick={handleLogout} className={`${btnBase} bg-foreground`}>
+                Log out
+              </button>
+            </div>
+          )}
         </div>
-      )}
+
+        <WalletPicker
+          open={pickerOpen}
+          onOpenChange={setPickerOpen}
+          onTurnkeySelect={handleTurnkeyLogin}
+          onSolanaSelect={handleSolanaSelect}
+        />
+
+        {!isConnected && !solConnected ? (
+          <div className="flex flex-col items-center justify-center py-24">
+            <button onClick={() => setPickerOpen(true)} className={`${btnBase} bg-foreground px-8`}>
+              Connect Wallet
+            </button>
+          </div>
+        ) : isTurnkeyConnected ? (
+          /* Turnkey: one unified wallet card with ETH + SOL as sub-sections */
+          <div className="rounded-xl border border-border p-6 space-y-6">
+            <h2 className="text-base font-semibold">Turnkey Wallet</h2>
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium">Ethereum</p>
+                <p className="text-xs text-muted-foreground">Sepolia testnet</p>
+              </div>
+              <EthereumAccount />
+              <SignMessage />
+              <SendTransaction />
+            </div>
+
+            <div className="border-t border-border" />
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium">Solana</p>
+                <p className="text-xs text-muted-foreground">Devnet</p>
+              </div>
+              {solAddress ? (
+                <>
+                  <SolanaAccount address={solAddress} />
+                  <SignMessageSolana address={solAddress} />
+                  <SendTransactionSolana address={solAddress} />
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Loading accounts…</p>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* External wallets: separate ETH and SOL cards */
+          <div className="space-y-6">
+            {isConnected && (
+              <div className="rounded-xl border border-border p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold">Ethereum</h2>
+                    <p className="text-xs text-muted-foreground">Sepolia testnet</p>
+                  </div>
+                  <button onClick={() => wagmiDisconnect()} className={`${btnBase} bg-[#3898FF] group`}>
+                    <span className="group-hover:hidden">{address ? `${address.slice(0, 6)}…${address.slice(-4)}` : 'Connected'}</span>
+                    <span className="hidden group-hover:inline">Disconnect</span>
+                  </button>
+                </div>
+                <EthereumAccount />
+                <SignMessage />
+                <SendTransaction />
+              </div>
+            )}
+
+            {solConnected && (
+              <div className="rounded-xl border border-border p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-semibold">Solana</h2>
+                    <p className="text-xs text-muted-foreground">Devnet</p>
+                  </div>
+                  <button onClick={() => solDisconnect()} className={`${btnBase} bg-[#9945FF] group`}>
+                    <span className="group-hover:hidden">
+                      {publicKey ? `${publicKey.toBase58().slice(0, 4)}...${publicKey.toBase58().slice(-4)}` : 'Connected'}
+                    </span>
+                    <span className="hidden group-hover:inline">Disconnect</span>
+                  </button>
+                </div>
+                <SolanaAccount />
+                <SignMessageSolana />
+                <SendTransactionSolana />
+              </div>
+            )}
+
+          </div>
+        )}
+      </div>
     </div>
   );
 }
