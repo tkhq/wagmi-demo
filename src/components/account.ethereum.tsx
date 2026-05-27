@@ -8,7 +8,7 @@ export const EthereumAccount = () => {
     address: address,
   });
   return (
-    <Card className="w-full max-w-sm mx-auto">
+    <Card className="w-full">
       <CardHeader>
         <CardTitle>Ethereum Account</CardTitle>
       </CardHeader>

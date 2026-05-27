@@ -1,60 +1,61 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { useWallet } from '@solana/wallet-adapter-react';
+import { useTurnkey } from '@turnkey/react-wallet-kit';
+import { toHex, type Hex } from 'viem';
 
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
-import { Hex, toHex } from 'viem';
+interface Props {
+  address?: string;
+}
 
-export function SignMessageSolana() {
+export function SignMessageSolana({ address }: Props) {
   const [message, setMessage] = useState<string>('Example Message');
   const [data, setData] = useState<Hex>();
-
-  // Hook to sign the message
-
-  const { connection } = useConnection();
-  const {
-    publicKey,
-    connect: connectSolanaWallet,
-    select,
-    wallets,
-    wallet,
-    signMessage: signSolMessage,
-  } = useWallet();
+  const { signMessage } = useWallet();
+  const { httpClient, session } = useTurnkey();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (message && signSolMessage) {
-      const data = await signSolMessage(new TextEncoder().encode(message));
-      setData(toHex(data));
+    if (!message) return;
+
+    if (address) {
+      if (!httpClient || !session?.organizationId) return;
+      const { r, s, v } = await httpClient.signRawPayload({
+        organizationId: session.organizationId,
+        signWith: address,
+        payload: message,
+        encoding: 'PAYLOAD_ENCODING_TEXT_UTF8',
+        hashFunction: 'HASH_FUNCTION_NOT_APPLICABLE',
+      });
+      setData(`0x${r}${s}${v}` as Hex);
+    } else {
+      if (!signMessage) return;
+      const result = await signMessage(new TextEncoder().encode(message));
+      setData(toHex(result));
     }
   };
 
-  useEffect(() => {
-    console.log('connector status', status);
-  }, [status]);
-
   return (
-    <Card className="w-full max-w-md">
+    <Card className="w-full">
       <CardHeader>
         <CardTitle>Sign Message</CardTitle>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="message">Message</Label>
+            <Label htmlFor="sol-message">Message</Label>
             <Input
-              id="message"
+              id="sol-message"
               placeholder="Enter your message..."
               value={message}
               onChange={(e) => setMessage(e.target.value)}
             />
           </div>
-
-          {/* {error && <div className="text-red-500 text-sm">{error.message}</div>} */}
 
           {data && (
             <Card className="bg-muted">
@@ -66,7 +67,7 @@ export function SignMessageSolana() {
             </Card>
           )}
 
-          <Button type="submit" disabled={!message}>
+          <Button type="submit" disabled={!message || (!address && !signMessage)}>
             Sign Message
           </Button>
         </form>

@@ -1,35 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useSignMessage } from 'wagmi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { useConnect } from 'wagmi';
 
 export function SignMessage() {
   const [message, setMessage] = useState<string>('Example Message');
 
-  // Hook to sign the message
   const { signMessage, isPending, error, data } = useSignMessage();
-  const { status } = useConnect();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (message) {
-      signMessage({
-        message,
-      });
+      signMessage({ message });
     }
   };
 
-  useEffect(() => {
-    console.log('connector status', status);
-  }, [status]);
-
   return (
-    <Card className="w-full max-w-md">
+    <Card className="w-full">
       <CardHeader>
         <CardTitle>Sign Message</CardTitle>
       </CardHeader>
@@ -51,7 +42,7 @@ export function SignMessage() {
             <Card className="bg-muted">
               <CardContent className="p-3">
                 <div className="text-muted-foreground text-sm break-all shadow-inner bg-transparent rounded-sm font-mono">
-                  {JSON.stringify(data, null, 2)}
+                  {data}
                 </div>
               </CardContent>
             </Card>

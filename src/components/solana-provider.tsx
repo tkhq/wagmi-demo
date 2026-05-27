@@ -7,11 +7,8 @@ import {
 } from '@solana/wallet-adapter-react';
 import { WalletModalProvider } from '@solana/wallet-adapter-react-ui';
 import { clusterApiUrl } from '@solana/web3.js';
-
 import { createTurnkeySolWalletAdapter } from '@/lib/turnkey-sol-adapter';
 
-// Ensure default wallet-adapter styles are available (no-op in production if imported elsewhere)
-import '@solana/wallet-adapter-react-ui/styles.css';
 
 interface Props {
   children: ReactNode;
@@ -19,12 +16,11 @@ interface Props {
 
 export const SolanaProvider: FC<Props> = ({ children }) => {
   const endpoint = useMemo(() => clusterApiUrl('devnet'), []);
-
   const wallets = useMemo(() => [createTurnkeySolWalletAdapter()], []);
 
   return (
     <ConnectionProvider endpoint={endpoint}>
-      <WalletProvider wallets={wallets} autoConnect>
+      <WalletProvider wallets={wallets} autoConnect={false}>
         <WalletModalProvider>{children}</WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
